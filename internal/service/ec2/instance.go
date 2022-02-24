@@ -1441,13 +1441,34 @@ func resourceInstanceUpdate(d *schema.ResourceData, meta interface{}) error {
 			}
 		}
 
+		// From the API reference:
+		// "If you are using an AWS SDK or command line tool,
+		// base64-encoding is performed for you, and you can load the text from a file.
+		// Otherwise, you must provide base64-encoded text".
+
 		if d.HasChange("user_data") {
 			log.Printf("[INFO] Modifying user data %s", d.Id())
+
 			input := &ec2.ModifyInstanceAttributeInput{
 				InstanceId: aws.String(d.Id()),
-				UserData: &ec2.BlobAttributeValue{
-					Value: []byte(d.Get("user_data").(string)),
-				},
+			}
+
+			userDataStr := d.Get("user_data").(string)
+
+			if verify.IsBase64Encoded([]byte(userDataStr)) {
+				// Decode so the AWS SDK doesn't double encode
+				userData, err := base64.StdEncoding.DecodeString(userDataStr)
+				if err != nil {
+					return fmt.Errorf("error decoding instance (%s) user data during update: %w", d.Id(), err)
+				}
+
+				input.UserData = &ec2.BlobAttributeValue{
+					Value: userData,
+				}
+			} else {
+				input.UserData = &ec2.BlobAttributeValue{
+					Value: []byte(userDataStr),
+				}
 			}
 
 			if err := modifyAttributeWithInstanceStopStart(d, conn, input); err != nil {
@@ -1457,16 +1478,28 @@ func resourceInstanceUpdate(d *schema.ResourceData, meta interface{}) error {
 
 		if d.HasChange("user_data_base64") {
 			log.Printf("[INFO] Modifying user data base64 %s", d.Id())
-			userData, err := base64.URLEncoding.DecodeString(d.Get("user_data_base64").(string))
-			if err != nil {
-				return fmt.Errorf("error updating instance (%s) user data base64: %w", d.Id(), err)
-			}
 
 			input := &ec2.ModifyInstanceAttributeInput{
 				InstanceId: aws.String(d.Id()),
-				UserData: &ec2.BlobAttributeValue{
-					Value: userData,
-				},
+			}
+
+			userDataBase64Str := d.Get("user_data_base64").(string)
+
+			// Schema validation technically ensures the data is Base64 encoded
+			if verify.IsBase64Encoded([]byte(userDataBase64Str)) {
+				// Decode so the AWS SDK doesn't double encode
+				userDataBase64, err := base64.StdEncoding.DecodeString(userDataBase64Str)
+				if err != nil {
+					return fmt.Errorf("error decoding instance (%s) user data base64 during update: %w", d.Id(), err)
+				}
+
+				input.UserData = &ec2.BlobAttributeValue{
+					Value: userDataBase64,
+				}
+			} else {
+				input.UserData = &ec2.BlobAttributeValue{
+					Value: []byte(userDataBase64Str),
+				}
 			}
 
 			if err := modifyAttributeWithInstanceStopStart(d, conn, input); err != nil {
